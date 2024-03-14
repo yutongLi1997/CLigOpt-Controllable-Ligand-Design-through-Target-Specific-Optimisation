@@ -142,60 +142,60 @@ class Decoder(torch.nn.Module):
         edge_type_mask = data_at_step.edge_type_mask * LARGE_NUMBER - LARGE_NUMBER
         
         
-        node_sequence = node_sequence.unsqueeze(1) # [b*v, 1]
+        node_sequence = node_sequence.unsqueeze(1) 
 
         total_v = node_sequence.shape[0]
         nv = int(total_v/num_grpahs)
-        z = torch.cat((z,node_sequence), dim = 1) # [b*v, 2h+1]
+        z = torch.cat((z,node_sequence), dim = 1) 
 
-        new_z = self.enc_dec(z,edge_index) # encoder on z, # [b*v, 2h+1]
+        new_z = self.enc_dec(z,edge_index) 
 
         # edge features
         # Take out the node in focus
-        node_in_focus = torch.sum((node_sequence*new_z).view(num_grpahs,-1,self.hidden_size), 1) # [b, 2h+1]
-        # h_u = new_z
+        node_in_focus = torch.sum((node_sequence*new_z).view(num_grpahs,-1,self.hidden_size), 1) 
+
         
         # edge features
-        edge_repr = torch.cat((node_in_focus.unsqueeze(1).expand(num_grpahs,nv,self.hidden_size).reshape(-1,self.hidden_size), new_z),1) # [b*v, 2*(h+h+1)]
-        local_graph_repr_before_expansion = torch.sum(new_z.reshape(num_grpahs,nv,self.hidden_size),1) # [b, 2h+1]
-        local_graph_repr = local_graph_repr_before_expansion.unsqueeze(1).expand(num_grpahs,nv,self.hidden_size).reshape(-1,self.hidden_size) # [b*v, 2h+1]
-        global_graph_repr_before_expansion = torch.sum(z.reshape(num_grpahs,nv,self.hidden_size),1) # [b, 2h+1]
-        global_graph_repr = global_graph_repr_before_expansion.unsqueeze(1).expand(num_grpahs,nv,65).reshape(-1,self.hidden_size) # [b*v,2h+1]
-        distance_repr = self.emb_distance(data_at_step.distance) # [b*v,2h+1]
-        overlapped_edge_repr = self.emb_overlapped_edge(data_at_step.overlapped_edge_features) # [b*v,2h+1]
-        combined_edge_repr = torch.cat((edge_repr, local_graph_repr, global_graph_repr, distance_repr, overlapped_edge_repr), 1) # [b*v,6*(2h+1)]
+        edge_repr = torch.cat((node_in_focus.unsqueeze(1).expand(num_grpahs,nv,self.hidden_size).reshape(-1,self.hidden_size), new_z),1) 
+        local_graph_repr_before_expansion = torch.sum(new_z.reshape(num_grpahs,nv,self.hidden_size),1) 
+        local_graph_repr = local_graph_repr_before_expansion.unsqueeze(1).expand(num_grpahs,nv,self.hidden_size).reshape(-1,self.hidden_size) 
+        global_graph_repr_before_expansion = torch.sum(z.reshape(num_grpahs,nv,self.hidden_size),1) 
+        global_graph_repr = global_graph_repr_before_expansion.unsqueeze(1).expand(num_grpahs,nv,65).reshape(-1,self.hidden_size) 
+        distance_repr = self.emb_distance(data_at_step.distance) 
+        overlapped_edge_repr = self.emb_overlapped_edge(data_at_step.overlapped_edge_features) 
+        combined_edge_repr = torch.cat((edge_repr, local_graph_repr, global_graph_repr, distance_repr, overlapped_edge_repr), 1) 
         
         # Add structural info (dist, ang) and iteration number
-        it_num = torch.tile(torch.FloatTensor([idx]).unsqueeze(0).to(device), [total_v, 1]) # [v,1]
+        it_num = torch.tile(torch.FloatTensor([idx]).unsqueeze(0).to(device), [total_v, 1]) 
         pos_info = torch.cat([dist.reshape(num_grpahs,-1).unsqueeze(1).expand(num_grpahs,nv,2).reshape(-1,2), it_num], axis=1)
-        combined_edge_repr = torch.cat([combined_edge_repr, pos_info], axis=1) # [b*v, 6(2h+1)+2+1]
+        combined_edge_repr = torch.cat([combined_edge_repr, pos_info], axis=1)
         
         # stop node features
         distance_to_stop_node = self.emb_distance(torch.tensor([0], device=z.device)).expand(num_grpahs,self.hidden_size)
         overlap_edge_stop_node = self.emb_overlapped_edge(torch.tensor([0], device=z.device)).expand(num_grpahs,self.hidden_size)
         combined_stop_node_repr = torch.cat((node_in_focus, self.stop_node.expand(num_grpahs, self.hidden_size), local_graph_repr_before_expansion, 
-                                     global_graph_repr_before_expansion, distance_to_stop_node, overlap_edge_stop_node, torch.mean(pos_info.reshape(num_grpahs,-1,3), 1)), 1) # [1, 6*(2h+1)+3]
+                                     global_graph_repr_before_expansion, distance_to_stop_node, overlap_edge_stop_node, torch.mean(pos_info.reshape(num_grpahs,-1,3), 1)), 1) 
         
         # edge logits
-        edge_logits = self.fc_edge_logits(combined_edge_repr.reshape(num_grpahs,-1,6*self.hidden_size+3)) # [b, v, 1]
-        edge_logits = edge_logits.squeeze()+edge_masks.reshape(num_grpahs,-1) # [b, v] 
-        stop_logits = self.fc_edge_logits(combined_stop_node_repr) # [b,1]
-        edge_logits = torch.cat([edge_logits, stop_logits], axis=1) # [b, v + 1]
+        edge_logits = self.fc_edge_logits(combined_edge_repr.reshape(num_grpahs,-1,6*self.hidden_size+3)) 
+        edge_logits = edge_logits.squeeze()+edge_masks.reshape(num_grpahs,-1) 
+        stop_logits = self.fc_edge_logits(combined_stop_node_repr) 
+        edge_logits = torch.cat([edge_logits, stop_logits], axis=1) 
         
-#         edge_probs = torch.log(self.ac(edge_logits)+ SMALL_NUMBER) # [v+1]
-        edge_probs = self.ac(edge_logits) # [v+1]
+#         edge_probs = torch.log(self.ac(edge_logits)+ SMALL_NUMBER)
+        edge_probs = self.ac(edge_logits) 
         # edge_probs = self.sigmoid(edge_logits)
         #edge type logits
-        edge_type_logit0 = self.fc_edge_type0(combined_edge_repr.reshape(num_grpahs, -1, 6*self.hidden_size+3)) # [b, v, 1]
+        edge_type_logit0 = self.fc_edge_type0(combined_edge_repr.reshape(num_grpahs, -1, 6*self.hidden_size+3))
         edge_type_logit1 = self.fc_edge_type1(combined_edge_repr.reshape(num_grpahs, -1, 6*self.hidden_size+3))
         edge_type_logit2 = self.fc_edge_type2(combined_edge_repr.reshape(num_grpahs, -1, 6*self.hidden_size+3))
         edge_type_logit3 = self.fc_edge_type3(combined_edge_repr.reshape(num_grpahs, -1, 6*self.hidden_size+3))
 
-        edge_type_logits = torch.cat((edge_type_logit0,edge_type_logit1,edge_type_logit2, edge_type_logit3),2) # [b, v,4]
+        edge_type_logits = torch.cat((edge_type_logit0,edge_type_logit1,edge_type_logit2, edge_type_logit3),2) 
         edge_type_logits =  edge_type_logits.permute(0,2,1)+edge_type_mask.reshape(num_grpahs,4,nv)
         
-#         edge_type_probs = torch.log(self.ac(edge_type_logits)+ SMALL_NUMBER) # [4, v]
-        edge_type_probs = F.softmax(edge_type_logits, dim = 1) # [4, v]
+#         edge_type_probs = torch.log(self.ac(edge_type_logits)+ SMALL_NUMBER)
+        edge_type_probs = F.softmax(edge_type_logits, dim = 1)
         # edge_type_probs = F.softmax(edge_type_logits, dim = 1)
         
         return edge_probs, edge_type_probs
@@ -239,27 +239,27 @@ class OptLinker(torch.nn.Module):
         nv = int(x_out.size()[0]/num_graphs)
         
 #------------------------------------ Encoder ------------------------------------
-        x_padded_in = pad_annotations(x_in,device = device) # [b*v, h]
+        x_padded_in = pad_annotations(x_in,device = device) 
 #         x_embed_in = self.embed(x_padded_in) # [b*v_in,h]
         x_embed_in = self.embed_in(torch.argmax(x_padded_in, axis = 1))
-        x_encoded_in = self.encoder(x_embed_in, edge_index_in) # [b*v_in,h]
+        x_encoded_in = self.encoder(x_embed_in, edge_index_in) 
 
-        x_padded_out = pad_annotations(x_out,device = device) # [b*v, h]
-        x_embed_out = self.embed_out(torch.argmax(x_padded_out, axis = 1)) # [b*v_in,h]
+        x_padded_out = pad_annotations(x_out,device = device) 
+        x_embed_out = self.embed_out(torch.argmax(x_padded_out, axis = 1)) 
         x_encoded_out = self.encoder(x_embed_out, edge_index_out) # [b*v_in,h]
         
 #-------------------------------------Compute mean & variance-----------------------
 
-        mean = self.lin_mu(x_encoded_in) # [b*v, h]
-        logvariance = self.lin_logvariance(x_encoded_in) # [b*v, h]
+        mean = self.lin_mu(x_encoded_in) 
+        logvariance = self.lin_logvariance(x_encoded_in) 
         sigma = torch.exp(logvariance)
 
-        avg_last_h_out = gap(x_encoded_out, data.batch) # [b,h]
-        mean_out = self.lin_mu_out(avg_last_h_out) #[b,4]
-        logvariance_out = self.lin_logvariance_out(avg_last_h_out) # [b,4]
-        mean_out_ex = torch.tile(mean_out.unsqueeze(1), [1, nv, 1]).reshape((-1, self.out_dim)) # [b*v,4]
-        logvariance_out_ex = torch.tile(logvariance_out.unsqueeze(1), [1, nv, 1]).reshape((-1, self.out_dim))# [b*v,4]
-        sigma_out = torch.exp(logvariance_out_ex)# [b*v,4]
+        avg_last_h_out = gap(x_encoded_out, data.batch) 
+        mean_out = self.lin_mu_out(avg_last_h_out) 
+        logvariance_out = self.lin_logvariance_out(avg_last_h_out) 
+        mean_out_ex = torch.tile(mean_out.unsqueeze(1), [1, nv, 1]).reshape((-1, self.out_dim)) 
+        logvariance_out_ex = torch.tile(logvariance_out.unsqueeze(1), [1, nv, 1]).reshape((-1, self.out_dim))
+        sigma_out = torch.exp(logvariance_out_ex)
         
 #---------------------------------------- Distribution ------------------------------------
 
@@ -269,10 +269,10 @@ class OptLinker(torch.nn.Module):
 
 #         distrib_out = torch.distributions.Normal(loc=mean_out_ex, scale=sigma_out)
 # #       sample o from distribution
-#         o_out = distrib_out.sample() # [b,v,4]
+#         o_out = distrib_out.sample() 
         # zz = torch.normal(mean)
-        z_prior = torch.distributions.Normal(0,1).sample((x_out.size()[0], self.out_dim)).to(device) #[b*v,o]
-        z_prior_in = torch.distributions.Normal(0,1).sample((x_in.size()[0], self.hidden_size)).to(device) #[b*v,h]
+        z_prior = torch.distributions.Normal(0,1).sample((x_out.size()[0], self.out_dim)).to(device) 
+        z_prior_in = torch.distributions.Normal(0,1).sample((x_in.size()[0], self.hidden_size)).to(device) 
 
         z_sampled = mean_out_ex + sigma_out*z_prior
 
@@ -290,25 +290,25 @@ class OptLinker(torch.nn.Module):
         graph_state_mask_in1 = graph_state_mask_in.unsqueeze(1)
         graph_state_mask_out1 = Tensor(np.ones(graph_state_mask_in1.shape)).to(device)
 
-        mean = mean*graph_state_mask_in1 # [b*v, h]
-        # mean = mean.reshape([num_graphs,nv,self.hidden_size])# [b,v, h]
-        inverted_mask = torch.ones(graph_state_mask_in1.shape).to(device) - graph_state_mask_in1 # [b*v,1]
-        # inverted_mask = inverted_mask.reshape([num_graphs, nv, -1]) # [b,v,1]
+        mean = mean*graph_state_mask_in1 
+        # mean = mean.reshape([num_graphs,nv,self.hidden_size])
+        inverted_mask = torch.ones(graph_state_mask_in1.shape).to(device) - graph_state_mask_in1
+        # inverted_mask = inverted_mask.reshape([num_graphs, nv, -1]) 
 
-        update_vals = z_prior_in*inverted_mask # [b*v,h]
-        mean = torch.add(mean, update_vals) # [b*v,h]
+        update_vals = z_prior_in*inverted_mask 
+        mean = torch.add(mean, update_vals) 
         atten_mi = self.atten(num_graphs, nv, mean, graph_state_mask_out1)
 
         # o_out = o_out.reshape([-1, self.out_dim])
-        z_sampled = self.lin_mean_combine_weights_in(z_sampled) # [b*v, h]
-        mean_sampled = mean * graph_state_mask_out1 + atten_mi * z_sampled # [b*v,h]
-        # mean_sampled = mean_sampled.reshape([-1, self.hidden_size]) # [b&v]
+        z_sampled = self.lin_mean_combine_weights_in(z_sampled) 
+        mean_sampled = mean * graph_state_mask_out1 + atten_mi * z_sampled 
+        # mean_sampled = mean_sampled.reshape([-1, self.hidden_size]) 
 
 #------------------------------------------ Sample -------------------------------------------
-#         lantent_node_state = self.embed_out(mean_sampled) # [b*v,h]
+#         lantent_node_state = self.embed_out(mean_sampled) 
         lantent_node_state = x_embed_out
         
-        z = torch.cat((mean_sampled, lantent_node_state), -1) # [b*v, 2h] # initial representation for decoder # filtered_z_sampled
+        z = torch.cat((mean_sampled, lantent_node_state), -1) 
         # z = torch.cat((mean_sampled, lantent_node_state), -1) 
 
         
@@ -326,24 +326,24 @@ class OptLinker(torch.nn.Module):
 #--------------------------------------------Node Symbol---------------------------------------
         
         atoms = (graph_state_mask_in.reshape(num_graphs,-1) ==0).nonzero(as_tuple=True)[0]
-        num_atoms = torch.bincount(atoms) # [b]
-        num_atoms = num_atoms.unsqueeze(1).expand(num_graphs,nv).unsqueeze(2) #[b,v,1]
-        dist = abs_dist.reshape(num_graphs,-1).unsqueeze(1).expand(num_graphs,nv,2) #[b,v,2]
+        num_atoms = torch.bincount(atoms) 
+        num_atoms = num_atoms.unsqueeze(1).expand(num_graphs,nv).unsqueeze(2) 
+        dist = abs_dist.reshape(num_graphs,-1).unsqueeze(1).expand(num_graphs,nv,2) 
         
-        pos_info = torch.cat([num_atoms, dist], axis=2).reshape(-1,3) # [b*v, 3]
+        pos_info = torch.cat([num_atoms, dist], axis=2).reshape(-1,3) 
         
-        # z_sampled = torch.cat([lantent_node_state, pos_info], axis = 1) # [b*v, h+3]
-        z_sampled = torch.cat([mean_sampled, pos_info], axis = 1) # [b*v, h+3]
+        # z_sampled = torch.cat([lantent_node_state, pos_info], axis = 1) 
+        z_sampled = torch.cat([mean_sampled, pos_info], axis = 1) 
 
 # --------------------------------------- Attention ------------------------------------
         node_mask = graph_state_mask_out1 - graph_state_mask_in1
         atten_mi_node = self.atten_node(num_graphs, nv, z_sampled, node_mask)
         
         z_sampled_out = self.lin_mean_combine_weights_in_node(z_sampled)
-        z_sampled = z_sampled*graph_state_mask_in1 + atten_mi_node*z_sampled_out # [b*v,h+3]
+        z_sampled = z_sampled*graph_state_mask_in1 + atten_mi_node*z_sampled_out 
 
-        node_logits = self.lin_node_symbol(z_sampled) # [b*v, 14]
+        node_logits = self.lin_node_symbol(z_sampled) 
 
-        node_probs = self.softmax(node_logits) # [b*v, 14]
+        node_probs = self.softmax(node_logits) 
     
         return loss_kl, edge_probs, edge_type_probs, node_probs
